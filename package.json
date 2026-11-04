@@ -1,0 +1,14 @@
+{
+  "name": "sol-tx-explainer",
+  "version": "0.1.0",
+  "description": "Explain Solana transactions in plain language and flag risky patterns before you sign. Zero dependencies, works offline.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "bin": { "sol-tx-explain": "src/cli.ts" },
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "explain": "node src/cli.ts"
+  }
+}

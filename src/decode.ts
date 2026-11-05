@@ -2,8 +2,10 @@ import { base58Encode } from './base58.ts';
 import {
   ASSOCIATED_TOKEN_PROGRAM,
   COMPUTE_BUDGET_PROGRAM,
+  LOOKUP_TABLE_PROGRAM,
   MEMO_PROGRAM,
   MEMO_V1_PROGRAM,
+  STAKE_PROGRAM,
   SYSTEM_PROGRAM,
   TOKEN_2022_PROGRAM,
   TOKEN_PROGRAM,
@@ -374,6 +376,187 @@ function decodeAssociatedToken(ctx: DecodeContext): DecodeResult {
   return undecoded(ctx, 'Associated Token Account Program', tag);
 }
 
+const STAKE_AUTHORITY = ['staker', 'withdrawer'];
+
+function stakeAuthorityChange(ctx: DecodeContext, kind: number, next: string, nextLabel: string, tag: string): DecodeResult {
+  const name = STAKE_AUTHORITY[kind] ?? `authority type ${kind}`;
+  const withdrawer = kind === 1;
+  return {
+    kind: `stake.${tag}`,
+    summary: `Stake: change the ${name} of stake account ${lab(ctx, 0)} to ${nextLabel}`,
+    decoded: true,
+    findings: [
+      {
+        severity: withdrawer ? 'danger' : 'warn',
+        code: withdrawer ? 'stake-withdrawer-change' : 'stake-staker-change',
+        message: withdrawer
+          ? `This gives ${nextLabel} the WITHDRAW authority of stake account ${lab(ctx, 0)}: the new withdrawer can move all staked SOL. Scams use this to take over stake accounts.`
+          : `This gives ${nextLabel} control over delegation of stake account ${lab(ctx, 0)} (it cannot withdraw the funds).`,
+      },
+    ],
+  };
+}
+
+function decodeStake(ctx: DecodeContext): DecodeResult {
+  const { data } = ctx;
+  if (data.length < 4) return malformed(ctx, 'Stake Program');
+  const tag = readU32(data, 0);
+  switch (tag) {
+    case 0:
+      return {
+        kind: 'stake.initialize',
+        summary: `Stake: set up stake account ${lab(ctx, 0)}`,
+        decoded: true,
+        findings: [],
+      };
+    case 1: {
+      if (data.length < 40) return malformed(ctx, 'Stake Program');
+      const next = base58Encode(data.subarray(4, 36));
+      return stakeAuthorityChange(ctx, readU32(data, 36), next, describeKey(next), 'authorize');
+    }
+    case 2:
+      return {
+        kind: 'stake.delegate',
+        summary: `Stake: delegate stake account ${lab(ctx, 0)} to validator vote account ${lab(ctx, 1)}`,
+        decoded: true,
+        findings: [],
+      };
+    case 3:
+      return {
+        kind: 'stake.split',
+        summary: `Stake: split ${formatSol(readU64(data, 4))} from ${lab(ctx, 0)} into new stake account ${lab(ctx, 1)}`,
+        decoded: true,
+        findings: [],
+      };
+    case 4: {
+      const recipient = ctx.accounts[1];
+      const findings: PartialFinding[] = [];
+      if (recipient && !recipient.signer) {
+        findings.push({
+          severity: 'warn',
+          code: 'stake-withdraw-to-other',
+          message: `This withdraws SOL from stake account ${lab(ctx, 0)} to ${lab(ctx, 1)}, which is not a signer of this transaction.`,
+        });
+      }
+      return {
+        kind: 'stake.withdraw',
+        summary: `Stake: withdraw ${formatSol(readU64(data, 4))} from stake account ${lab(ctx, 0)} to ${lab(ctx, 1)}`,
+        decoded: true,
+        findings,
+      };
+    }
+    case 5:
+      return {
+        kind: 'stake.deactivate',
+        summary: `Stake: start unstaking (deactivate) stake account ${lab(ctx, 0)}`,
+        decoded: true,
+        findings: [],
+      };
+    case 6:
+    case 12:
+      return {
+        kind: 'stake.setLockup',
+        summary: `Stake: change the lockup of stake account ${lab(ctx, 0)}`,
+        decoded: true,
+        findings: [
+          {
+            severity: 'warn',
+            code: 'stake-lockup-change',
+            message: `A lockup can block withdrawals from ${lab(ctx, 0)} until a date or epoch, or hand control of that to a custodian.`,
+          },
+        ],
+      };
+    case 7:
+      return {
+        kind: 'stake.merge',
+        summary: `Stake: merge stake account ${lab(ctx, 1)} into ${lab(ctx, 0)}`,
+        decoded: true,
+        findings: [],
+      };
+    case 8: {
+      if (data.length < 40) return malformed(ctx, 'Stake Program');
+      const next = base58Encode(data.subarray(4, 36));
+      return stakeAuthorityChange(ctx, readU32(data, 36), next, describeKey(next), 'authorizeWithSeed');
+    }
+    case 9:
+      return {
+        kind: 'stake.initializeChecked',
+        summary: `Stake: set up stake account ${lab(ctx, 0)} with staker ${lab(ctx, 2)} and withdrawer ${lab(ctx, 3)}`,
+        decoded: true,
+        findings: [],
+      };
+    case 10:
+      return stakeAuthorityChange(ctx, readU32(data, 4), '', lab(ctx, 3), 'authorizeChecked');
+    case 11:
+      return stakeAuthorityChange(ctx, readU32(data, 4), '', lab(ctx, 3), 'authorizeCheckedWithSeed');
+    default:
+      return undecoded(ctx, 'Stake Program', tag);
+  }
+}
+
+function decodeLookupTable(ctx: DecodeContext): DecodeResult {
+  const { data } = ctx;
+  if (data.length < 4) return malformed(ctx, 'Address Lookup Table Program');
+  const tag = readU32(data, 0);
+  switch (tag) {
+    case 0:
+      return {
+        kind: 'lookupTable.create',
+        summary: `Address lookup table: create table ${lab(ctx, 0)} (authority ${lab(ctx, 1)})`,
+        decoded: true,
+        findings: [],
+      };
+    case 1:
+      return {
+        kind: 'lookupTable.freeze',
+        summary: `Address lookup table: freeze table ${lab(ctx, 0)} so it can never be changed again`,
+        decoded: true,
+        findings: [
+          {
+            severity: 'info',
+            code: 'lookup-table-freeze',
+            message: `Freezing ${lab(ctx, 0)} is permanent.`,
+          },
+        ],
+      };
+    case 2: {
+      const count = Number(readU64(data, 4));
+      return {
+        kind: 'lookupTable.extend',
+        summary: `Address lookup table: add ${count} address${count === 1 ? '' : 'es'} to table ${lab(ctx, 0)}`,
+        decoded: true,
+        findings: [],
+      };
+    }
+    case 3:
+      return {
+        kind: 'lookupTable.deactivate',
+        summary: `Address lookup table: deactivate table ${lab(ctx, 0)}`,
+        decoded: true,
+        findings: [],
+      };
+    case 4: {
+      const recipient = ctx.accounts[2];
+      const findings: PartialFinding[] = [];
+      if (recipient && !recipient.signer) {
+        findings.push({
+          severity: 'warn',
+          code: 'lookup-table-close-recipient',
+          message: `Closing table ${lab(ctx, 0)} sends its rent SOL to ${lab(ctx, 2)}, which is not a signer of this transaction.`,
+        });
+      }
+      return {
+        kind: 'lookupTable.close',
+        summary: `Address lookup table: close table ${lab(ctx, 0)} and send its rent to ${lab(ctx, 2)}`,
+        decoded: true,
+        findings,
+      };
+    }
+    default:
+      return undecoded(ctx, 'Address Lookup Table Program', tag);
+  }
+}
+
 /** Explain one instruction. Returns null when the program is not decoded by this tool. */
 export function decodeInstruction(ctx: DecodeContext): DecodeResult | null {
   switch (ctx.programId) {
@@ -389,6 +572,10 @@ export function decodeInstruction(ctx: DecodeContext): DecodeResult | null {
       return decodeMemo(ctx);
     case ASSOCIATED_TOKEN_PROGRAM:
       return decodeAssociatedToken(ctx);
+    case STAKE_PROGRAM:
+      return safely(ctx, 'Stake Program', decodeStake);
+    case LOOKUP_TABLE_PROGRAM:
+      return safely(ctx, 'Address Lookup Table Program', decodeLookupTable);
     default:
       return null;
   }

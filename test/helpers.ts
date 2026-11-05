@@ -192,3 +192,64 @@ export function computeLimit(units: number): Ix {
 export function memo(text: string): Ix {
   return { programId: MEMO, keys: [], data: new TextEncoder().encode(text) };
 }
+
+export const STAKE = 'Stake11111111111111111111111111111111111111';
+export const LOOKUP_TABLE = 'AddressLookupTab1e1111111111111111111111111';
+
+export function stakeAuthorize(stake: string, authority: string, newAuthority: string, kind: 0 | 1): Ix {
+  return {
+    programId: STAKE,
+    keys: [
+      { pubkey: stake, isSigner: false, isWritable: true },
+      { pubkey: authority, isSigner: true, isWritable: false },
+    ],
+    data: concat(u32le(1), base58Decode(newAuthority), u32le(kind)),
+  };
+}
+
+export function stakeDelegate(stake: string, vote: string, authority: string): Ix {
+  return {
+    programId: STAKE,
+    keys: [
+      { pubkey: stake, isSigner: false, isWritable: true },
+      { pubkey: vote, isSigner: false, isWritable: false },
+      { pubkey: authority, isSigner: true, isWritable: false },
+    ],
+    data: u32le(2),
+  };
+}
+
+export function stakeWithdraw(stake: string, recipient: string, authority: string, lamports: bigint): Ix {
+  return {
+    programId: STAKE,
+    keys: [
+      { pubkey: stake, isSigner: false, isWritable: true },
+      { pubkey: recipient, isSigner: false, isWritable: true },
+      { pubkey: authority, isSigner: true, isWritable: false },
+    ],
+    data: concat(u32le(4), u64le(lamports)),
+  };
+}
+
+export function lookupTableExtend(table: string, authority: string, keys: string[]): Ix {
+  return {
+    programId: LOOKUP_TABLE,
+    keys: [
+      { pubkey: table, isSigner: false, isWritable: true },
+      { pubkey: authority, isSigner: true, isWritable: false },
+    ],
+    data: concat(u32le(2), u64le(BigInt(keys.length)), ...keys.map((k) => base58Decode(k))),
+  };
+}
+
+export function lookupTableClose(table: string, authority: string, recipient: string): Ix {
+  return {
+    programId: LOOKUP_TABLE,
+    keys: [
+      { pubkey: table, isSigner: false, isWritable: true },
+      { pubkey: authority, isSigner: true, isWritable: false },
+      { pubkey: recipient, isSigner: false, isWritable: true },
+    ],
+    data: u32le(4),
+  };
+}

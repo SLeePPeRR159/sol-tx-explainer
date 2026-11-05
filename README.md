@@ -17,13 +17,15 @@ Most users sign transactions they cannot read. This tool decodes the wire format
 ## What it decodes
 - Legacy and v0 transactions (address lookup tables are shown as unresolved, never guessed)
 - System Program, SPL Token and Token-2022, Associated Token Account, Compute Budget, Memo
-- Recognizes (without decoding) Stake, Vote, Address Lookup Table, BPF Upgradeable Loader, Jupiter v6
+- Stake Program (delegate, split, withdraw, deactivate, merge, authority changes, lockups)
+- Address Lookup Table Program (create, extend, freeze, deactivate, close)
+- Recognizes (without decoding) Vote, BPF Upgradeable Loader, Jupiter v6
 
 ## What it flags
 | Level | Examples |
 |---|---|
-| danger | unlimited token approval; token account owner change; signing account assigned to another program; priority fee ≥ 0.1 SOL |
-| caution | limited approval; authority removal; closing an account to a third party; unknown program; priority fee ≥ 0.01 SOL |
+| danger | unlimited token approval; token account owner change; stake withdrawer change; signing account assigned to another program; priority fee ≥ 0.1 SOL |
+| caution | limited approval; authority removal; staker change; stake withdrawal or table close to a third party; lockup change; closing an account to a third party; unknown program; priority fee ≥ 0.01 SOL |
 | info | unresolved lookup tables |
 
 ## Usage
@@ -40,7 +42,7 @@ Exit codes: 0 ok/caution, 2 danger, 1 error (useful in CI or scripts).
 As a library: `import { explainTransaction } from './src/index.ts'`.
 
 ## Tests
-`npm test` (or `node --test test/*.test.ts`). 15 tests cover parsing, each risk rule, fees, v0, malformed input and the CLI.
+`npm test` (or `node --test test/*.test.ts`). 22 tests cover parsing, each risk rule, stake and lookup-table instructions, fees, v0, malformed input and the CLI.
 
 ## Limitations (honest)
 It cannot prove a transaction is safe. Unknown programs are only flagged, not analyzed. Lookup-table accounts cannot be resolved offline. Fee numbers are estimates. Not financial advice.

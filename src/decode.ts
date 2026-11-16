@@ -1,6 +1,7 @@
 import { base58Encode } from './base58.ts';
 import {
   ASSOCIATED_TOKEN_PROGRAM,
+  BPF_UPGRADEABLE_LOADER,
   COMPUTE_BUDGET_PROGRAM,
   LOOKUP_TABLE_PROGRAM,
   MEMO_PROGRAM,
@@ -557,6 +558,113 @@ function decodeLookupTable(ctx: DecodeContext): DecodeResult {
   }
 }
 
+function decodeBpfLoader(ctx: DecodeContext): DecodeResult {
+  const { data } = ctx;
+  if (data.length < 4) return malformed(ctx, 'BPF Upgradeable Loader');
+  const tag = readU32(data, 0);
+  switch (tag) {
+    case 0:
+      return {
+        kind: 'bpfLoader.initializeBuffer',
+        summary: `Program loader: initialize buffer ${lab(ctx, 0)}`,
+        decoded: true,
+        findings: [],
+      };
+    case 1:
+      return {
+        kind: 'bpfLoader.write',
+        summary: `Program loader: write program bytes into buffer ${lab(ctx, 0)}`,
+        decoded: true,
+        findings: [],
+      };
+    case 2:
+      return {
+        kind: 'bpfLoader.deploy',
+        summary: `Program loader: deploy new program ${lab(ctx, 2)} from buffer ${lab(ctx, 3)}`,
+        decoded: true,
+        findings: [
+          {
+            severity: 'info',
+            code: 'program-deploy',
+            message: `This deploys executable code to ${lab(ctx, 2)}. Only sign if you are the developer.`,
+          },
+        ],
+      };
+    case 3:
+      return {
+        kind: 'bpfLoader.upgrade',
+        summary: `Program loader: upgrade program ${lab(ctx, 1)} with the code in buffer ${lab(ctx, 2)}`,
+        decoded: true,
+        findings: [
+          {
+            severity: 'warn',
+            code: 'program-upgrade',
+            message: `Upgrading ${lab(ctx, 1)} replaces its code; everyone using this program will run the new code.`,
+          },
+        ],
+      };
+    case 4:
+    case 7: {
+      const next = ctx.accounts[2];
+      const target = lab(ctx, 0);
+      if (!next) {
+        return {
+          kind: 'bpfLoader.setAuthority',
+          summary: `Program loader: remove the upgrade authority of ${target}, making it immutable`,
+          decoded: true,
+          findings: [
+            {
+              severity: 'warn',
+              code: 'program-authority-removed',
+              message: `Removing the authority of ${target} is permanent: the program can never be upgraded again.`,
+            },
+          ],
+        };
+      }
+      return {
+        kind: 'bpfLoader.setAuthority',
+        summary: `Program loader: change the upgrade authority of ${target} to ${lab(ctx, 2)}`,
+        decoded: true,
+        findings: [
+          {
+            severity: 'danger',
+            code: 'program-authority-change',
+            message: `Whoever controls ${lab(ctx, 2)} will be able to replace the code of ${target}. Only sign if you know this account.`,
+          },
+        ],
+      };
+    }
+    case 5: {
+      const recipient = ctx.accounts[1];
+      const findings: PartialFinding[] = [];
+      if (recipient && !recipient.signer) {
+        findings.push({
+          severity: 'warn',
+          code: 'program-close-recipient',
+          message: `Closing ${lab(ctx, 0)} sends its SOL to ${lab(ctx, 1)}, which is not a signer of this transaction.`,
+        });
+      }
+      return {
+        kind: 'bpfLoader.close',
+        summary: `Program loader: close ${lab(ctx, 0)} and send its SOL to ${lab(ctx, 1)}`,
+        decoded: true,
+        findings,
+      };
+    }
+    case 6: {
+      const bytes = readU32(data, 4);
+      return {
+        kind: 'bpfLoader.extend',
+        summary: `Program loader: extend program data ${lab(ctx, 0)} by ${bytes} bytes`,
+        decoded: true,
+        findings: [],
+      };
+    }
+    default:
+      return undecoded(ctx, 'BPF Upgradeable Loader', tag);
+  }
+}
+
 /** Explain one instruction. Returns null when the program is not decoded by this tool. */
 export function decodeInstruction(ctx: DecodeContext): DecodeResult | null {
   switch (ctx.programId) {
@@ -576,6 +684,8 @@ export function decodeInstruction(ctx: DecodeContext): DecodeResult | null {
       return safely(ctx, 'Stake Program', decodeStake);
     case LOOKUP_TABLE_PROGRAM:
       return safely(ctx, 'Address Lookup Table Program', decodeLookupTable);
+    case BPF_UPGRADEABLE_LOADER:
+      return safely(ctx, 'BPF Upgradeable Loader', decodeBpfLoader);
     default:
       return null;
   }

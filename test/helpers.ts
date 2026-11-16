@@ -253,3 +253,28 @@ export function lookupTableClose(table: string, authority: string, recipient: st
     data: u32le(4),
   };
 }
+
+export const BPF_LOADER = 'BPFLoaderUpgradeab1e11111111111111111111111';
+
+export function bpfUpgrade(programData: string, program: string, buffer: string, spill: string, authority: string): Ix {
+  return {
+    programId: BPF_LOADER,
+    keys: [
+      { pubkey: programData, isSigner: false, isWritable: true },
+      { pubkey: program, isSigner: false, isWritable: true },
+      { pubkey: buffer, isSigner: false, isWritable: true },
+      { pubkey: spill, isSigner: false, isWritable: true },
+      { pubkey: authority, isSigner: true, isWritable: false },
+    ],
+    data: u32le(3),
+  };
+}
+
+export function bpfSetAuthority(account: string, current: string, next?: string): Ix {
+  const keys: Meta[] = [
+    { pubkey: account, isSigner: false, isWritable: true },
+    { pubkey: current, isSigner: true, isWritable: false },
+  ];
+  if (next) keys.push({ pubkey: next, isSigner: false, isWritable: false });
+  return { programId: BPF_LOADER, keys, data: u32le(4) };
+}
